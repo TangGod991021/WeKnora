@@ -6,7 +6,9 @@
 ## 硬性规则（AI 提交代码时必须遵守）
 
 1. **禁止在 `main` 上提交任何代码。** `main` 只是 `upstream/main` 的纯镜像，只允许 fast-forward。
-2. **所有定制提交必须落在 `feature` 分支。** 不要在 `production` 上手工提交 —— 它由脚本派生。
+2. **所有定制提交必须落在 `feature` 分支。** 不要在 `production` 上手工提交 —— 它由
+   `bash fork/sync-upstream.sh --production` 从 `feature` 派生，基底是 `fork/production-tag`
+   记录的上游 release tag（当前 `v0.8.2`）。生产构建只认 `fork/build/*` tag，不认分支名。
 3. **推送定制分支统一用 `git push --force-with-lease --force-if-includes`**，禁止裸 `--force`。
 4. **不得向 `upstream` 推送**（pushurl 已重定向到 `DISABLED-no-push-to-upstream`，物理上会失败）。
 5. **fork 自建 tag 一律用 `fork/` 前缀**，避免与上游 `v*` tag 冲突、避免触发需 secrets 的镜像构建。

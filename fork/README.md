@@ -20,7 +20,8 @@
 | `fork/install-hooks.sh` | 把守卫从 `fork/git-hooks/` 分发到 `.git/hooks/`（幂等，可重复执行） |
 | `fork/git-hooks/pre-commit` | **守卫真相源**：禁止在 `main`/`production` 上提交，链式转调上游钩子 |
 | `fork/git-hooks/pre-push` | **守卫真相源**：禁止推 `upstream`、禁止强推 `main`，链式转调上游钩子 |
-| `fork/.state/` | 同步状态（基点、锚定 tag、同步日志）。被 `.gitignore` 的 `.*` 规则自动忽略，不入库 |
+| `fork/production-tag` | **入库**：production 锚定的上游 release tag（当前 `v0.8.2`）。属项目配置，不是本地状态 |
+| `fork/.state/` | 本地同步状态（基点、同步日志）。被 `.gitignore` 的 `.*` 规则自动忽略，不入库 |
 | `CLAUDE.md`（仓库根） | 给 AI 的硬规则入口，指向本文档 |
 
 **本工作流不修改任何上游跟踪的文件。** 唯一改动的 `core.hooksPath` 是 `.git/config` 里的本地配置项，不是文件。
@@ -158,16 +159,36 @@ bash fork/sync-upstream.sh --production  # 额外派生 production
 
 推送一律 `--force-with-lease --force-if-includes`（`push.useForceIfIncludes` 已在初始化时设好，裸 `--force` 会被 pre-push 拦下）。
 
-### 5.3 升级 production 到新的上游版本
+### 5.3 production 分支
 
-先在 `feature` 上验证新版可用，再重建 `production`。`sync-upstream.sh --production` 用的就是重建法，**无状态、可重复执行**：
+`production` 的定制补丁重放到上游 release tag 上，用于构建部署。**当前锚定 `v0.8.2`**
+（记录在入库文件 `fork/production-tag` 中）。
+
+重建 / 升级：
+
+```bash
+# 升级到新版本：先改锚定 tag，再重新派生
+printf 'v0.9.0\n' > fork/production-tag && git commit -am "chore(fork): production 锚定 v0.9.0"
+bash fork/sync-upstream.sh --production --no-push   # 本地派生并验证
+bash fork/sync-upstream.sh --production             # 验证通过后派生并推送
+```
+
+等价的手工形式：
 
 ```bash
 git switch -C production feature
-git rebase --no-fork-point --onto <新tag> main production
+git rebase --no-fork-point --onto v0.9.0 main production
 ```
 
-含义：「把 `production` 相对 `main` 多出来的提交，重放到 `<新tag>` 上」。因为 `feature` = `main` + 定制，相对 `main` 多出来的正好是定制补丁。
+含义：「把 `production` 相对 `main` 多出来的提交，重放到 `v0.9.0` 上」。因为
+`feature` = `main` + 定制，相对 `main` 多出来的正好是定制补丁。
+
+**注意 `--production` 不依赖上游是否有新提交** —— 上游没动时也能重建（这正是最常见的用法）。
+派生成功会打 `fork/build/<tag>-<时间戳>` 注解 tag，**对外只认这个 tag，不要引用 `production`
+分支名**：它的 SHA 每次派生都会变。
+
+⚠️ **v0.8.2 落后上游 main 67 个提交 / 736 个文件**，且**不含语雀目录结构保持功能**
+（`4364e61a` 晚于 v0.8.2）。若生产上需要该功能，需等 v0.8.3 或改锚到更新的版本。
 
 ## 6. 缩小冲突面（最重要的一节）
 
@@ -249,10 +270,14 @@ git worktree remove ../weknora-sync-test
 
 | # | 定制内容 | 涉及的上游文件 | 补丁方式 | 上游是否已有替代实现 |
 |---|---|---|---|---|
-| — | （暂无定制提交） | — | — | — |
+| 1 | 本工作流自身（`fork/` 工具、`CLAUDE.md`） | **无** —— 全部是上游不存在的新路径 | 新增文件 | 不适用（fork 专属） |
+| — | （业务定制尚未开始） | — | — | — |
 
-> 现状：`feature` 与 `main` 完全重合，尚无任何定制提交。
-> 首个计划中的定制是「飞书数据源同步保持目录结构」；同类的**语雀**部分上游已实现，直接复用，不要自己写。
+> 现状：`feature` 上 9 个提交**全部是本工作流的搭建与修复**，没有一行改动上游文件，
+> 相对上游 main 的差异就是这 9 个文件。业务定制尚未开始。
+>
+> 首个计划中的定制是「飞书数据源同步保持目录结构」。**语雀那部分上游已实现**
+> （`4364e61a` / PR #3476），直接复用，不要自己写。动手前先做第 6 节的上游撞车检查。
 
 ## 11. 变更记录
 
@@ -261,6 +286,9 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 初版：建立三分支模型、初始化与同步脚本、链式钩子、AI 硬规则 |
 | 2026-09-28 | 修复守卫在 `main` 上静默失效：改由 `fork/install-hooks.sh` 分发到 `.git/hooks/`，`core.hooksPath` 留空（见 4.1 节） |
 | 2026-09-28 | 新增 `fork/.gitattributes`，把无扩展名的钩子钉死为 LF（否则 `core.autocrlf=true` 下下次 checkout 会破坏 shebang） |
+| 2026-09-28 | `--production` 脱离「上游是否有新提交」：原先 main 没动就 `exit 0`，导致 production 永远派生不出来 |
+| 2026-09-28 | 锚定 tag 从本地状态 `fork/.state/production-tag` 改为入库的 `fork/production-tag` |
+| 2026-09-28 | 建立 `production` 分支并推送至 origin，锚定 `v0.8.2` |
 
 ### 验证记录（模拟上游）
 
