@@ -60,6 +60,10 @@ say "前置检查"
 git rev-parse --verify -q "$CUSTOM" >/dev/null || die "分支 $CUSTOM 不存在"
 git rev-parse --verify -q "refs/remotes/$UPSTREAM_REMOTE/main" >/dev/null \
   || die "缺少 $UPSTREAM_REMOTE/main，请先跑 bash fork/init-fork.sh"
+git rev-parse --verify -q "refs/heads/$MIRROR" >/dev/null \
+  || die "本地没有 $MIRROR 分支。它应由 init-fork.sh 建立（git fetch upstream main:$MIRROR）"
+# .state/ 是本地状态、不入库，新 clone 后不存在，这里补建（否则成功 rebase 后写状态会崩）
+mkdir -p "$STATE_DIR"
 
 cur="$(git symbolic-ref -q --short HEAD || echo DETACHED)"
 # 真实同步要在 $MIRROR 上执行 ff-only 更新，而 git 拒绝更新已 checkout 的分支。
