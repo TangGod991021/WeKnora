@@ -10,6 +10,100 @@
 
 放在 `fork/` 下是刻意的：这是上游不存在的路径，因此**本工作流的全部文件与上游结构性零冲突**。
 
+## 0. 日常流程速查
+
+### 心智模型（先记住这个）
+
+| 分支 | 你怎么对待它 |
+|---|---|
+| `main` | **永远不碰。** 脚本自己更新，你不需要、也不应该 checkout 它工作 |
+| `feature` | **你干活的地方。** 所有定制提交都落在这里 |
+| `production` | **只在要部署时重建。** 不手工提交，不手工 rebase |
+
+一句话：**你只在 `feature` 上写代码，其余交给脚本。**
+
+### A. 写新功能（最常做）
+
+```bash
+git switch feature                  # 确保在 feature 上
+# ── 动手前必做：上游撞车检查（上游日更，很容易重复实现）──
+git log --oneline --since='90 days ago' upstream/main -- <你要改的目录>
+git log --oneline -i --grep='<关键词>' upstream/main | head
+
+# ── 写代码，然后提交 ──
+git add <文件> && git commit -m "feat(scope): 说明"
+git push origin feature
+```
+
+**补丁尽量写成「新文件 + 1~3 行接缝」**，不要改上游大文件里的几十行——那是冲突温床（详见第 6 节）。
+
+### B. 同步上游 main 代码（定期做）
+
+```bash
+bash fork/sync-upstream.sh --dry-run     # ① 先看计划：待重放补丁数、冲突预判，不改任何 ref
+bash fork/sync-upstream.sh --build       # ② 真同步 + 构建校验（推荐，能提前发现编译不兼容）
+```
+
+`--build` 会跑 `go build ./cmd/server`。**rebase 干净 ≠ 能编译**——上游改了签名或 revert 了
+你依赖的功能时，rebase 会成功但构建会炸，这是最常见的隐性故障。
+
+想先本地看看再推：加 `--no-push`。
+
+### C. 同步时遇到冲突
+
+脚本**不会自动 abort**，会保留现场并打印指引，退出码 3：
+
+```bash
+git status                                    # 看 U 状态文件
+git rerere status && git rerere diff          # 看 rerere 是否已自动解过
+#   ── 手工解决后 ──
+git add <文件> && git rebase --continue
+#   ── 放弃本次同步，回到同步前 ──
+git rebase --abort
+#   ── 或硬回退到脚本打印的备份 tag ──
+git reset --hard fork/backup/feature/<时间戳>
+```
+
+**冲突解完继续，不要解一半就 abort**——rerere 只在「解决且操作继续」时记录解法，
+解一半放弃等于这次白解，下次还要重解。
+
+### D. 部署生产版本
+
+```bash
+bash fork/sync-upstream.sh --production      # 重建 production 并推送
+```
+
+生产构建**只认 `fork/build/<tag>-<时间戳>` 这个 tag**，不要引用 `production` 分支名——
+它的 SHA 每次重建都会变。
+
+升级到新的上游版本：改 `fork/production-tag` 里的版本号 → 提交 → 再跑上面那条。
+
+### E. 上游把你的补丁吸收了
+
+同步时脚本会告警 `定制补丁数从 N 降到 M`，并列出**被丢弃的那条**（打 `-` 的）。
+这是预期行为（patch-id 完全相同才会被丢），去 `fork/README.md` 第 10 节「定制清单」里
+把对应条目删掉即可。
+
+### 三条铁律
+
+1. **不在 `main` 上提交** —— 钩子会拦，且 `main` 必须保持与上游逐字节一致
+2. **不在 `feature` 上执行 `git pull`** —— 全局 `pull.rebase=false` 会造出 merge commit，
+   破坏「线性定制序列」不变式（脚本的后置校验会因此报错）
+3. **推送定制分支用同步脚本，不要手敲 `--force`** —— 手工非快进推送会被 pre-push 守卫拦下
+
+### 出问题时的自检命令
+
+```bash
+# 三条核心断言：只要都成立，工作流就是健康的
+git merge-base --is-ancestor upstream/main feature && echo "✓ 在最新上游之上"
+git rev-list --count feature..upstream/main          # 应为 0（不是 0 就该同步了）
+git rev-list --merges upstream/main..feature | wc -l # 应为 0（线性，无 merge commit）
+
+# 我到底改了什么（这就是你的冲突面）
+git diff --stat upstream/main...feature
+git log --oneline upstream/main..feature
+```
+
 ## 2. 涉及文件清单
 
 | 文件 | 用途 |
@@ -291,6 +385,7 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 建立 `production` 分支并推送至 origin，锚定 `v0.8.2` |
 | 2026-09-28 | 修：同步脚本被自己的 pre-push 守卫挡住 —— 脚本作为授权路径显式设 `ALLOW_FORCE_PUSH=1`（它一律用 `--force-with-lease`） |
 | 2026-09-28 | 新增「排障：git 连不上 GitHub」小节（系统代理与 git 代理的区别、hosts 不能配代理） |
+| 2026-09-28 | 新增第 0 节「日常流程速查」：写功能 / 同步上游 / 处理冲突 / 部署 / 自检命令 |
 
 ### 验证记录（模拟上游）
 
