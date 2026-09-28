@@ -1,0 +1,14 @@
+# order-report Skill 依赖
+#
+# 只列真正被 run_report.py import 的包。
+# 注意：装包时打包代理会把它们装进本技能自己的 .venv（uv pip install --python .venv/bin/python -r requirements.txt），
+# 不要装进系统 Python —— 同一镜像上所有技能共享根文件系统，装全局会污染其他技能。
+
+# 目标库驱动：用哪个留哪个，两个都留也无害（体积换省事）
+pymysql>=1.1.0            # MySQL / MariaDB（默认驱动）
+psycopg2-binary>=2.9.9    # PostgreSQL，仅在 REPORT_DB_DRIVER=postgres 时需要
+
+# xlsx 生成
+openpyxl>=3.1.2
+
+# sqlite3 是标准库，本地自检/离线数据用，无需安装
