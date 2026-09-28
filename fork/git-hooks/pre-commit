@@ -5,8 +5,10 @@
 #   ALLOW_PROTECTED_COMMIT=1 git commit ...
 #   SKIP_HOOKS=1 git commit ...          # 同时跳过上游检查
 #
-# 安装：由 fork/init-fork.sh 设置 core.hooksPath -> fork/git-hooks。
-# 注意：不要再跑 ./scripts/install-git-hooks.sh，它会把 core.hooksPath 覆盖回去。
+# 本文件是【唯一真相源】，运行位置是 .git/hooks/pre-commit（由 fork/install-hooks.sh 分发）。
+# 必须分发到工作区之外：fork/ 只在 feature 分支上存在，切到 main 时会被 git 删除，
+# 而 main 恰恰是守卫最需要生效的分支 —— 那样守卫会静默失效。
+# 改完本文件后重跑：bash fork/install-hooks.sh
 
 set -euo pipefail
 

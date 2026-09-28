@@ -17,8 +17,9 @@
 | `fork/README.md` | 本文档 |
 | `fork/init-fork.sh` | 一次性初始化（幂等）：配 remote、写 git config、装钩子、记录同步基点 |
 | `fork/sync-upstream.sh` | 日常同步：fetch → ff-only 镜像 main → 备份 → rebase feature |
-| `fork/git-hooks/pre-commit` | 禁止在 `main`/`production` 上提交，链式转调上游钩子 |
-| `fork/git-hooks/pre-push` | 禁止推 `upstream`、禁止强推 `main`，链式转调上游钩子 |
+| `fork/install-hooks.sh` | 把守卫从 `fork/git-hooks/` 分发到 `.git/hooks/`（幂等，可重复执行） |
+| `fork/git-hooks/pre-commit` | **守卫真相源**：禁止在 `main`/`production` 上提交，链式转调上游钩子 |
+| `fork/git-hooks/pre-push` | **守卫真相源**：禁止推 `upstream`、禁止强推 `main`，链式转调上游钩子 |
 | `fork/.state/` | 同步状态（基点、锚定 tag、同步日志）。被 `.gitignore` 的 `.*` 规则自动忽略，不入库 |
 | `CLAUDE.md`（仓库根） | 给 AI 的硬规则入口，指向本文档 |
 
@@ -97,7 +98,28 @@ git range-diff upstream/main@{1}..upstream/main        # 改写后的内容对�
 - **上游 hook 体系**：`fork/git-hooks/*` 链式转调 `scripts/git-hooks/*`（上游跟踪的文件）。因此：
   - 链式调用必须用**绝对路径** exec —— 上游钩子靠 `dirname "$0"` 推导 ROOT。
   - `pre-push` 必须先 `STDIN_DATA="$(cat)"` 缓冲再回灌 —— git 通过 stdin 传 ref 列表，被读干会让上游检查**静默失活**。
-- ⚠️ **不要再执行 `./scripts/install-git-hooks.sh`** —— 它会把 `core.hooksPath` 覆盖回 `scripts/git-hooks`，导致 fork 守卫被静默禁用。上游钩子已由 fork 守卫链式调用，功能不丢。
+
+### 4.1 守卫钩子为什么必须装在 `.git/hooks/`
+
+这是本工作流踩过的一个**真实坑**，值得单独说明：
+
+> 最初的设计是把 `core.hooksPath` 指向工作区内的 `fork/git-hooks/`。看起来更优雅（受版本控制、可 review），
+> 但它有一个致命缺陷：**`fork/` 目录只在 `feature` 分支上存在**。当你 `git checkout main` 时，git 会按
+> `main` 的树重建工作区，把 `fork/git-hooks/pre-commit` 一并删掉 —— 而 `main` 恰恰是守卫**最需要生效**
+> 的分支。此时 `core.hooksPath` 指向一个不存在的目录，**git 会静默跳过所有钩子**，守卫形同虚设，
+> 而且没有任何报错。（该失效已在实现过程中被实际复现。）
+
+因此守卫必须放在**工作区之外**的 `.git/hooks/`：那里的文件不受任何分支切换影响。
+
+- `fork/git-hooks/` 仍是**唯一真相源**（入库、可 review）。
+- `fork/install-hooks.sh` 负责把守卫复制到 `.git/hooks/`，幂等，可重复执行。
+- **`core.hooksPath` 留空** —— git 的内置默认就是 `$GIT_DIR/hooks`，会自动跟随仓库位置。
+  不要写绝对路径：仓库一旦移动，绝对路径失效，守卫又会静默失灵（同一类故障的另一种形态）。
+- 改完 `fork/git-hooks/` 下的文件后**必须重跑** `bash fork/install-hooks.sh`，否则改动不生效。
+
+⚠️ **`./scripts/install-git-hooks.sh` 会破坏守卫**：它会把 `core.hooksPath` 设成 `scripts/git-hooks`，
+`.git/hooks/` 里的守卫随即被绕过。上游钩子不必通过 hooksPath 启用 —— 守卫会链式转调它们。
+若已误执行，跑一次 `bash fork/install-hooks.sh` 即可修复。
 
 ## 5. 使用方式
 
@@ -200,10 +222,15 @@ git diff --stat upstream/main...feature
 # 哪些补丁已被上游吸收（下次 rebase 会被静默丢弃，以 '-' 开头）
 git cherry -v upstream/main feature | grep '^-'
 
-# 钩子生效：在 main 上提交应被拒绝
-git config core.hooksPath
-git switch main && git commit --allow-empty -m test    # 期望被拒
-git switch feature
+# 钩子生效：守卫必须装在 .git/hooks/，且 core.hooksPath 必须留空
+ls .git/hooks/ | grep -v sample          # 期望看到 pre-commit / pre-push
+git config --get core.hooksPath          # 期望无输出（未设置）
+
+# ★关键回归测试：在一个【没有 fork/ 目录】的分支上提交也应被拒绝
+#   （用 production 派生自 upstream/main 复现，比拿 main 做测试安全）
+git branch -f production upstream/main
+git switch production && git commit --allow-empty -m probe    # 期望被拒
+git switch feature && git branch -D production
 
 # 误推上游已被阻断（期望失败）
 git push upstream main

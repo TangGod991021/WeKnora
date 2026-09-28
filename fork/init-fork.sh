@@ -65,12 +65,10 @@ git config --local branch."$MIRROR".remote upstream
 git config --local branch."$MIRROR".merge refs/heads/main
 
 # ---------------------------------------------------------------- 3. 钩子
-say "安装 fork 钩子（core.hooksPath -> fork/git-hooks）"
-mkdir -p fork/git-hooks fork/.state
-chmod +x fork/git-hooks/* 2>/dev/null || true
-git config --local core.hooksPath fork/git-hooks
-warn "以后不要再执行 ./scripts/install-git-hooks.sh —— 它会把 core.hooksPath 覆盖回"
-warn "scripts/git-hooks，导致 fork 守卫被静默禁用。fork 守卫已链式调用上游钩子。"
+# 守卫必须装到工作区之外的 .git/hooks/：fork/ 只在 feature 上存在，切到 main 会被删掉，
+# 而 main 正是守卫最需要生效的分支（详见 fork/install-hooks.sh 顶部的说明）。
+mkdir -p fork/.state
+bash "$ROOT/fork/install-hooks.sh"
 
 # ---------------------------------------------------------------- 4. 首次抓取
 say "抓取上游（--prune --tags）"

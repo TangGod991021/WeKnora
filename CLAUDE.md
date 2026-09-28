@@ -49,8 +49,14 @@ gh search prs --repo Tencent/WeKnora --state open <关键词>
 
 ## 不要做的事
 
-- **不要再执行 `./scripts/install-git-hooks.sh`** —— 它会把 `core.hooksPath` 覆盖回
-  `scripts/git-hooks`，静默禁用 fork 守卫（上游钩子已由 fork 守卫链式调用，功能不丢）。
+- **不要再执行 `./scripts/install-git-hooks.sh`** —— 它会把 `core.hooksPath` 设成
+  `scripts/git-hooks`，绕过 `.git/hooks/` 里的 fork 守卫（上游钩子已由守卫链式调用，功能不丢）。
+  误执行后跑 `bash fork/install-hooks.sh` 修复。
+- **改过 `fork/git-hooks/` 下的文件后必须重跑 `bash fork/install-hooks.sh`** ——
+  `fork/git-hooks/` 只是真相源，实际执行的是 `.git/hooks/` 里的副本，不会自动同步。
+- **不要把守卫挪回工作区内**（如把 `core.hooksPath` 指向 `fork/git-hooks`）。`fork/` 只在
+  `feature` 上存在，切到 `main` 时会被 git 删除，守卫会**静默失效**且无任何报错。原因详见
+  `fork/README.md` 第 4.1 节。
 - **不要在 `feature` 上执行 `git pull`** —— 全局 `pull.rebase=false` 会造出 merge commit，
   破坏「线性定制序列」不变式。同步只用 `bash fork/sync-upstream.sh`。
 - **不要改 `.github/workflows/` 里那 13 个文件**（上游跟踪，必冲突）。需要专属 CI 就新增

@@ -7,6 +7,9 @@
 #
 # ★关键：git 通过 stdin 把待推送的 ref 列表传给 pre-push。本脚本必须先把它缓冲下来，
 #   再原样回灌给上游 pre-push —— 否则上游检查会读到空输入而静默失活。
+#
+# 本文件是【唯一真相源】，运行位置是 .git/hooks/pre-push（由 fork/install-hooks.sh 分发）。
+# 改完本文件后重跑：bash fork/install-hooks.sh
 
 set -euo pipefail
 
