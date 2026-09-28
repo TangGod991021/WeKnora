@@ -259,3 +259,15 @@ git worktree remove ../weknora-sync-test
 | 日期 | 变更 |
 |---|---|
 | 2026-09-28 | 初版：建立三分支模型、初始化与同步脚本、链式钩子、AI 硬规则 |
+| 2026-09-28 | 修复守卫在 `main` 上静默失效：改由 `fork/install-hooks.sh` 分发到 `.git/hooks/`，`core.hooksPath` 留空（见 4.1 节） |
+| 2026-09-28 | 新增 `fork/.gitattributes`，把无扩展名的钩子钉死为 LF（否则 `core.autocrlf=true` 下下次 checkout 会破坏 shebang） |
+
+### 已知未验证项
+
+`fork/sync-upstream.sh --dry-run` 的**正常路径**（fetch 成功后打印待重放补丁数与冲突预判）尚未实测：
+实现完成时本机到 github.com 的网络中断。**失败路径已验证**（fetch 失败会大声报错并中止，
+不留下任何半成品状态）。网络恢复后请跑一次确认：
+
+```bash
+bash fork/sync-upstream.sh --dry-run
+```
