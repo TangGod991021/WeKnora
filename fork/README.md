@@ -289,6 +289,7 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | `--production` 脱离「上游是否有新提交」：原先 main 没动就 `exit 0`，导致 production 永远派生不出来 |
 | 2026-09-28 | 锚定 tag 从本地状态 `fork/.state/production-tag` 改为入库的 `fork/production-tag` |
 | 2026-09-28 | 建立 `production` 分支并推送至 origin，锚定 `v0.8.2` |
+| 2026-09-28 | 修：同步脚本被自己的 pre-push 守卫挡住 —— 脚本作为授权路径显式设 `ALLOW_FORCE_PUSH=1`（它一律用 `--force-with-lease`） |
 
 ### 验证记录（模拟上游）
 
