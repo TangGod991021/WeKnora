@@ -86,8 +86,8 @@ fi
 if [ -n "$PRODUCTION_TAG" ]; then
   git rev-parse --verify -q "refs/tags/$PRODUCTION_TAG" >/dev/null \
     || die "tag $PRODUCTION_TAG 不存在（先 git fetch --tags upstream）"
-  printf '%s\n' "$PRODUCTION_TAG" > fork/.state/production-tag
-  echo "已记录 production 锚定 tag = $PRODUCTION_TAG"
+  printf '%s\n' "$PRODUCTION_TAG" > fork/production-tag
+  echo "已记录 production 锚定 tag = $PRODUCTION_TAG（fork/production-tag，需入库）"
 fi
 
 # ---------------------------------------------------------------- 6. 收尾
