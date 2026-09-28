@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# fork 守卫：禁止在受保护分支上提交，然后链式调用上游 pre-commit。
+#
+# 绕过方式（确有必要时）：
+#   ALLOW_PROTECTED_COMMIT=1 git commit ...
+#   SKIP_HOOKS=1 git commit ...          # 同时跳过上游检查
+#
+# 安装：由 fork/init-fork.sh 设置 core.hooksPath -> fork/git-hooks。
+# 注意：不要再跑 ./scripts/install-git-hooks.sh，它会把 core.hooksPath 覆盖回去。
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+if [[ "${SKIP_HOOKS:-}" == "1" ]]; then
+  exit 0
+fi
+
+branch="$(git symbolic-ref -q --short HEAD || true)"
+
+# rebase / cherry-pick / merge 进行中时不能拦：sequencer 会在分支上生成提交
+in_progress=0
+for p in rebase-merge rebase-apply CHERRY_PICK_HEAD MERGE_HEAD REVERT_HEAD; do
+  if [[ -e "$(git rev-parse --git-path "$p")" ]]; then
+    in_progress=1
+    break
+  fi
+done
+
+case "$branch" in
+  main|production)
+    if [[ "$in_progress" == "0" && "${ALLOW_PROTECTED_COMMIT:-}" != "1" ]]; then
+      {
+        echo "✗ 拒绝在受保护分支 '$branch' 上提交。"
+        echo "  main       只能是 upstream/main 的纯镜像，永不提交。"
+        echo "  production 只能由 fork/sync-upstream.sh --production 派生，不手工提交。"
+        echo "  → 请在 feature 上做定制。"
+        echo "  → 确需提交：ALLOW_PROTECTED_COMMIT=1 git commit ..."
+      } >&2
+      exit 1
+    fi
+    ;;
+esac
+
+# 链式调用上游 pre-commit（绝对路径，它靠 dirname \$0 推导 ROOT）
+if [[ -x "$ROOT/scripts/git-hooks/pre-commit" ]]; then
+  exec "$ROOT/scripts/git-hooks/pre-commit" "$@"
+fi
+exit 0
