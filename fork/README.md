@@ -290,6 +290,7 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 锚定 tag 从本地状态 `fork/.state/production-tag` 改为入库的 `fork/production-tag` |
 | 2026-09-28 | 建立 `production` 分支并推送至 origin，锚定 `v0.8.2` |
 | 2026-09-28 | 修：同步脚本被自己的 pre-push 守卫挡住 —— 脚本作为授权路径显式设 `ALLOW_FORCE_PUSH=1`（它一律用 `--force-with-lease`） |
+| 2026-09-28 | 新增「排障：git 连不上 GitHub」小节（系统代理与 git 代理的区别、hosts 不能配代理） |
 
 ### 验证记录（模拟上游）
 
@@ -311,6 +312,42 @@ git worktree remove ../weknora-sync-test
 **未在真实上游验证过**：上游做 history rewrite（force-push）时的 `--onto` 处理路径 —— 该场景
 无法按需构造。逻辑见 3.4 节，届时请留意 `git range-diff upstream/main@{1}..upstream/main`。
 
-> 排查网络问题时：若 git 报 `Connection was reset` 而浏览器能开 GitHub，通常是代理只作用于系统/
-> 浏览器、未传给 git。git 认 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量，也可用
-> `gh` 或用 `git config --global http.https://github.com/.proxy http://127.0.0.1:<端口>` 按域配置。
+### 排障：git 连不上 GitHub
+
+**症状**：浏览器能打开 GitHub，但 git 报 `Failed to connect ... port 443` 或
+`Recv failure: Connection was reset`。
+
+**原因**：梯子通常只设置 Windows **系统代理**（浏览器读它），而 **git 不读系统代理** ——
+git 只认环境变量或自己的 `http.proxy` 配置。于是浏览器通、git 不通。
+
+**诊断**：
+
+```bash
+# 看系统代理是否开着（Windows）
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" | grep -i proxyserver
+# 看 git 自己的代理配置
+git config --get-regexp 'http.*proxy' || echo "(未配置)"
+```
+
+**修复**（按域配置，只有 github.com 走代理，不影响内网 git 服务器）：
+
+```bash
+git config --global http.https://github.com/.proxy http://127.0.0.1:<你的代理端口>
+# 常见端口：7890 / 7897 (Clash)、10809 (v2ray)、1080
+```
+
+验证（**不要**设环境变量，那样测不出配置是否生效）：
+
+```bash
+git ls-remote --heads https://github.com/Tencent/WeKnora.git main
+```
+
+其他备注：
+
+- **临时用法**（不改配置）：`HTTPS_PROXY=http://127.0.0.1:7897 bash fork/sync-upstream.sh`
+- **端口会变**：Clash 重启后端口可能变化，届时同步会突然失败，先查端口再改配置。
+- **`gh` CLI 不读 git 的 `http.proxy`**，它只认 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量。
+  所以 `gh api ...`、`gh workflow disable ...` 这类命令需要先设环境变量。
+- **不要改 hosts 文件来"配代理"**：hosts 只能做「域名 → IP」映射，**没有端口语法**，
+  无法表达代理。把 GitHub 钉到某个直连 IP 反而会绕过你的梯子，且 GitHub 的 IP 会轮换，
+  几周后失效且报错具有迷惑性。
