@@ -365,12 +365,25 @@ git worktree remove ../weknora-sync-test
 | # | 定制内容 | 涉及的上游文件 | 补丁方式 | 上游是否已有替代实现 |
 |---|---|---|---|---|
 | 1 | 本工作流自身（`fork/` 工具、`CLAUDE.md`） | **无** —— 全部是上游不存在的新路径 | 新增文件 | 不适用（fork 专属） |
-| — | （业务定制尚未开始） | — | — | — |
+| 2 | 报表自动化方案（语雀报表文档规范 + `order-report` 技能包 + Agent 提示词 + 分层自检清单），见 `fork/report-automation/README.md` | **无** —— 全部新增文件，落在上游不存在的 `fork/report-automation/` | 新增文件（零上游代码改动） | 上游**无**报表/导出类实现；本方案只用上游既有的「上传技能包 + 沙箱密钥 + 自定义 Agent + 沙箱产物链路」四个扩展点 |
 
-> 现状：`feature` 上 9 个提交**全部是本工作流的搭建与修复**，没有一行改动上游文件，
-> 相对上游 main 的差异就是这 9 个文件。业务定制尚未开始。
+> 现状：`feature` 上 14 个提交全部是工作流的搭建与修复，没有一行改动上游文件。
+> 业务定制目前只有第 2 项，且它是**纯新增文件**（不动上游任何路径），因此不增加冲突面。
 >
-> 首个计划中的定制是「飞书数据源同步保持目录结构」。**语雀那部分上游已实现**
+> 第 2 项落地时确认过的上游事实（供后续复用，别重复踩）：
+> - `database_query` 工具的白名单**硬编码**为 `knowledge_bases` / `knowledges` / `chunks`
+>   三张表（`internal/agent/tools/database_query.go:260`），**不能**用来查业务库；
+>   全仓无 text2sql / nl2sql 模块，`internal/datasource/connector/` 下只有文档源连接器
+>   （语雀/Notion/飞书/Confluence），没有数据库连接器。
+> - 技能的环境变量声明走 `.weknora/requirements.json`，值由管理员在「沙箱密钥」填写，
+>   AES-GCM 加密；变量名必须**字面出现在包内某个文件里**才会被登记
+>   （`bundleMentionsEnvName`，见 `internal/application/service/tenant_skill_env_declare.go`）。
+> - 已安装技能执行时 WorkDir 是 `/workspace` 而非技能目录，脚本必须用
+>   `$WEKNORA_SKILL_DIR` 定位（`internal/agent/skills/manager.go:33`）。
+> - 切块器保护 Markdown 表格行（跨块重复表头），但**不保护代码块**
+>   （`internal/infrastructure/chunker/splitter.go` 的 `protectedPatterns`）。
+>
+> 下一个计划中的定制是「飞书数据源同步保持目录结构」。**语雀那部分上游已实现**
 > （`4364e61a` / PR #3476），直接复用，不要自己写。动手前先做第 6 节的上游撞车检查。
 
 ## 11. 变更记录
@@ -386,6 +399,7 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 修：同步脚本被自己的 pre-push 守卫挡住 —— 脚本作为授权路径显式设 `ALLOW_FORCE_PUSH=1`（它一律用 `--force-with-lease`） |
 | 2026-09-28 | 新增「排障：git 连不上 GitHub」小节（系统代理与 git 代理的区别、hosts 不能配代理） |
 | 2026-09-28 | 新增第 0 节「日常流程速查」：写功能 / 同步上游 / 处理冲突 / 部署 / 自检命令 |
+| 2026-09-28 | 第 10 节新增定制项 2：报表自动化方案（`fork/report-automation/`，纯新增文件，不动上游路径）；同节记入落地时确认的上游事实（`database_query` 白名单硬编码、技能 env 声明的登记规则、`$WEKNORA_SKILL_DIR`、代码块不被切块保护） |
 
 ### 验证记录（模拟上游）
 
