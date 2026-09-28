@@ -192,8 +192,10 @@ AFTER="$(git rev-list --count "$MIRROR..$CUSTOM")"
 if [ "$AFTER" -lt "$BEFORE" ]; then
   warn "定制补丁数从 $BEFORE 降到 $AFTER —— 有补丁被判定为 clean cherry-pick 而静默丢弃。"
   warn "若这是「上游已实现了我的补丁」，属预期；若否，用 git reset --hard $BACKUP_TAG 回退。"
-  warn "下次 rebase 丢的补丁："
-  git log --oneline --right-only "$MIRROR...$CUSTOM" >&2 || true
+  # 对比【备份的旧 feature】与【新 base】：'-' 打头的就是 patch-id 已被上游吸收、因而被丢弃的提交。
+  # 注意不能用 --right-only "$MIRROR...$CUSTOM"，那列出的是【剩下的】补丁，语义正好相反。
+  warn "被丢弃的补丁（'-' 表示上游已有等价实现）："
+  git cherry -v "$MIRROR" "$BACKUP_TAG" 2>/dev/null | grep '^-' | sed 's/^- /  /' >&2 || true
 fi
 echo "✓ 定制补丁数: $AFTER"
 
