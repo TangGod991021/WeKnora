@@ -254,6 +254,11 @@ fi
 # ------------------------------------------------------------ 9. 推送
 if [ "$DO_PUSH" = 1 ]; then
   say "推送到 $FORK_REMOTE"
+  # 本脚本是【授权的推送路径】：它一律用 --force-with-lease --force-if-includes，
+  # 这正是 pre-push 守卫想要的安全形式。守卫默认要求 ALLOW_FORCE_PUSH=1 才放行非快进推送，
+  # 那是为了拦【手滑的裸 --force】；这里显式声明，脚本才不会被自己的守卫挡住。
+  # 守卫真正的安全网不受影响：远端跟踪引用与远端 SHA 不一致时，任何来源都会被拒。
+  export ALLOW_FORCE_PUSH=1
   git fetch --prune "$FORK_REMOTE"
   git push --force-with-lease --force-if-includes "$FORK_REMOTE" "$CUSTOM"
 
