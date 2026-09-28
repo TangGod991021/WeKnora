@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# fork 守卫：拒绝推 upstream、拒绝强推 main，然后链式调用上游 pre-push。
+#
+# 绕过方式：
+#   ALLOW_FORCE_PUSH=1 ...               # 放行定制分支的强推
+#   SKIP_HOOKS=1 git push ...            # 同时跳过上游检查
+#
+# ★关键：git 通过 stdin 把待推送的 ref 列表传给 pre-push。本脚本必须先把它缓冲下来，
+#   再原样回灌给上游 pre-push —— 否则上游检查会读到空输入而静默失活。
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+if [[ "${SKIP_HOOKS:-}" == "1" ]]; then
+  exit 0
+fi
+
+remote="${1:-origin}"
+
+if [[ "$remote" == "upstream" ]]; then
+  {
+    echo "✗ 禁止向 upstream 推送 —— 那是上游开源仓库，不是你的 fork。"
+    echo "  → 请推 origin（你的 fork）。"
+  } >&2
+  exit 1
+fi
+
+ZERO=0000000000000000000000000000000000000000
+STDIN_DATA="$(cat)"          # ★必须先缓冲：上游 pre-push 要读同一份 stdin
+
+if [[ -n "$STDIN_DATA" ]]; then
+  while read -r lref lsha rref rsha; do
+    [[ -n "${lref:-}" ]] || continue
+    [[ "$lsha" =~ ^0+$ ]] && continue        # 删除分支，放行
+    [[ "$rsha" =~ ^0+$ ]] && continue        # 新建分支，一定不是非快进
+
+    rbranch="${rref#refs/heads/}"
+
+    if [[ "$rbranch" == "main" ]]; then
+      if ! git merge-base --is-ancestor "$rsha" "$lsha"; then
+        {
+          echo "✗ 拒绝对 main 的非快进推送 —— main 必须只是 upstream/main 的镜像。"
+          echo "  本地 $lsha / 远端 $rsha"
+        } >&2
+        exit 1
+      fi
+      continue
+    fi
+
+    case "$rbranch" in
+      feature|production|preview)
+        if ! git merge-base --is-ancestor "$rsha" "$lsha"; then
+          # rebase 后的非快进属预期，但必须用 --force-with-lease 而非裸 --force
+          tracked="$(git rev-parse --verify -q "refs/remotes/$remote/$rbranch" || echo none)"
+          if [[ "$tracked" != "$rsha" ]]; then
+            {
+              echo "✗ $rbranch 的非快进推送被拒：$remote 上的分支已与本地跟踪基准不一致。"
+              echo "  跟踪基准 $tracked / 远端 $rsha"
+              echo "  → 先 git fetch $remote，确认远端没有你未见过的提交，再重试。"
+            } >&2
+            exit 1
+          fi
+          if [[ "${ALLOW_FORCE_PUSH:-}" != "1" ]]; then
+            {
+              echo "⚠  $rbranch 是非快进推送（rebase 后属预期）。"
+              echo "   请使用：git push --force-with-lease --force-if-includes $remote $rbranch"
+              echo "   确认后加 ALLOW_FORCE_PUSH=1 重跑。"
+            } >&2
+            exit 1
+          fi
+        fi
+        ;;
+    esac
+  done <<<"$STDIN_DATA"
+fi
+
+# 链式调用上游 pre-push，并把 ref 列表原样回灌
+if [[ -x "$ROOT/scripts/git-hooks/pre-push" ]]; then
+  if [[ -n "$STDIN_DATA" ]]; then
+    printf '%s\n' "$STDIN_DATA" | "$ROOT/scripts/git-hooks/pre-push" "$@"
+  else
+    "$ROOT/scripts/git-hooks/pre-push" "$@" </dev/null
+  fi
+fi
+exit 0
