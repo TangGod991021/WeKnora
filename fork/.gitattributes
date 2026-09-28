@@ -1,0 +1,9 @@
+# fork/ 下的文件一律保持 LF。
+#
+# 为什么必须有这个文件：fork/git-hooks/pre-commit 和 pre-push 按 git 的要求没有扩展名，
+# 因此匹配不到上游 .gitattributes 里的 `*.sh text eol=lf` 规则。在本机 core.autocrlf=true
+# 的情况下，它们会在下次 checkout 时被转成 CRLF，shebang 变成 `#!/usr/bin/env bash\r`，
+# 导致钩子执行失败（bad interpreter）。加通配规则把它们钉死为 LF。
+#
+# 注意：本文件本身需要 `git add -f` —— 上游 .gitignore 的 `.*` 规则会匹配任意层级的点文件。
+* text eol=lf
