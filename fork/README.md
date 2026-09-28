@@ -262,12 +262,26 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 修复守卫在 `main` 上静默失效：改由 `fork/install-hooks.sh` 分发到 `.git/hooks/`，`core.hooksPath` 留空（见 4.1 节） |
 | 2026-09-28 | 新增 `fork/.gitattributes`，把无扩展名的钩子钉死为 LF（否则 `core.autocrlf=true` 下下次 checkout 会破坏 shebang） |
 
-### 已知未验证项
+### 验证记录（模拟上游）
 
-`fork/sync-upstream.sh --dry-run` 的**正常路径**（fetch 成功后打印待重放补丁数与冲突预判）尚未实测：
-实现完成时本机到 github.com 的网络中断。**失败路径已验证**（fetch 失败会大声报错并中止，
-不留下任何半成品状态）。网络恢复后请跑一次确认：
+真实上游的推进不可控，因此上述路径是用一个**模拟上游**端到端实测的：从本仓库克隆一份带工作区的
+副本作为假上游，在其上制造提交，再把 `UPSTREAM_REMOTE` 指向它跑真实同步。
 
-```bash
-bash fork/sync-upstream.sh --dry-run
-```
+| 场景 | 结果 |
+|---|---|
+| `--dry-run` 正常路径 | ✓ 打印基点、待重放补丁数、冲突预判 |
+| 干净同步（无冲突） | ✓ ff-only 更新 main → 备份 → rebase → 后置校验 → 健康检查 → 写状态文件 |
+| 冲突（上游改同一文件） | ✓ 退出码 3、**现场保留不自动 abort**、列出冲突文件、提示带真实备份 tag |
+| 冲突后 `rebase --continue` | ✓ 继续跑通，备份 tag 可回退 |
+| 上游吸收了我的补丁 | ✓ 检出静默丢弃并列出**被丢弃的那一条** |
+| 全新 clone（无 `.state/`） | ✓ 自动补建状态目录，用 `merge-base` 回退基点 |
+| 在无 `fork/` 的分支上提交 | ✓ 守卫拦截（来自 `.git/hooks/`，不受分支影响） |
+| 误推 upstream | ✓ 被 pushurl 阻断 |
+| 前置检查：脏工作区 / 缺 `upstream/main` / 缺本地 `main` | ✓ 均给出明确提示并中止 |
+
+**未在真实上游验证过**：上游做 history rewrite（force-push）时的 `--onto` 处理路径 —— 该场景
+无法按需构造。逻辑见 3.4 节，届时请留意 `git range-diff upstream/main@{1}..upstream/main`。
+
+> 排查网络问题时：若 git 报 `Connection was reset` 而浏览器能开 GitHub，通常是代理只作用于系统/
+> 浏览器、未传给 git。git 认 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量，也可用
+> `gh` 或用 `git config --global http.https://github.com/.proxy http://127.0.0.1:<端口>` 按域配置。
