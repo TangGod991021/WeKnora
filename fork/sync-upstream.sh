@@ -62,9 +62,13 @@ git rev-parse --verify -q "refs/remotes/$UPSTREAM_REMOTE/main" >/dev/null \
   || die "缺少 $UPSTREAM_REMOTE/main，请先跑 bash fork/init-fork.sh"
 
 cur="$(git symbolic-ref -q --short HEAD || echo DETACHED)"
-if [ "$cur" = "$MIRROR" ]; then
-  die "当前在 $MIRROR 上。git fetch 拒绝更新已 checkout 的分支，请先 git switch $CUSTOM"
+# 真实同步要在 $MIRROR 上执行 ff-only 更新，而 git 拒绝更新已 checkout 的分支。
+# --dry-run 是只读的，不受此限 —— 在 $MIRROR 上预览计划正是常见用法。
+if [ "$cur" = "$MIRROR" ] && [ "$DRY_RUN" != 1 ]; then
+  die "当前在 $MIRROR 上。git fetch 拒绝更新已 checkout 的分支，请先 git switch $CUSTOM
+      （只想看计划：bash fork/sync-upstream.sh --dry-run，在 $MIRROR 上也能跑）"
 fi
+[ "$cur" = "$MIRROR" ] && warn "当前在 $MIRROR 上 —— 仅 --dry-run 可用，真实同步请先切到 $CUSTOM"
 echo "当前分支: $cur  定制线: $CUSTOM  镜像: $MIRROR"
 
 # ------------------------------------------------------------ 1. fetch 上游
