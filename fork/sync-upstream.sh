@@ -20,7 +20,9 @@ CUSTOM="${CUSTOM:-feature}"
 PRODUCTION_BRANCH="${PRODUCTION_BRANCH:-production}"
 STATE_DIR="fork/.state"
 BASE_FILE="$STATE_DIR/base"
-TAG_FILE="$STATE_DIR/production-tag"
+# 锚定 tag 是【项目配置】不是本地状态：它决定生产构建的基底，必须入库、可 review、
+# 且重新 clone 后不丢失。因此放在 fork/ 下而不是 fork/.state/ 下。
+TAG_FILE="fork/production-tag"
 
 DRY_RUN=0; DO_PUSH=1; DO_BUILD=0; DO_PRODUCTION=0
 while [ $# -gt 0 ]; do
@@ -135,68 +137,80 @@ EOF
   exit 1
 fi
 MIRROR_NOW="$(git rev-parse "$MIRROR")"
-
-if [ "$MIRROR_NOW" = "$OLD_MIRROR" ]; then
-  say "上游无新提交，无需 rebase"
-  exit 0
-fi
-echo "$MIRROR 前进: $(git rev-list --count "$OLD_MIRROR..$MIRROR_NOW") commit"
-
-# ------------------------------------------------------------ 4. 备份
+# 备份 tag 与 production 的 fork/build tag 都要用，提前定义（production 派生可能在本段之外运行）
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_TAG="fork/backup/$CUSTOM/$TS"
-git tag "$BACKUP_TAG" "$CUSTOM"
-git tag "fork/backup/$MIRROR/$TS" "$OLD_MIRROR"
-say "已备份: $BACKUP_TAG  (及 $MIRROR 旧值)"
 
-# ------------------------------------------------------------ 5. rebase
-base="$(cat "$BASE_FILE" 2>/dev/null || git merge-base "$MIRROR" "$CUSTOM")"
-if ! git merge-base --is-ancestor "$base" "$CUSTOM" 2>/dev/null; then
-  warn "基点 $base 已不是 $CUSTOM 的祖先，回退到 merge-base"
-  base="$(git merge-base "$MIRROR" "$CUSTOM")"
+MIRROR_MOVED=1
+if [ "$MIRROR_NOW" = "$OLD_MIRROR" ]; then
+  MIRROR_MOVED=0
+  say "上游无新提交，跳过 rebase"
+else
+  echo "$MIRROR 前进: $(git rev-list --count "$OLD_MIRROR..$MIRROR_NOW") commit"
 fi
-BEFORE="$(git rev-list --count "$base..$CUSTOM")"
-say "重放 $BEFORE 条定制补丁：($base .. $CUSTOM) -> $MIRROR"
 
-set +e
-git rebase --no-fork-point --onto "$MIRROR" "$base" "$CUSTOM"
-rc=$?
-set -e
+# 注意：下面这段只在镜像前进时执行（没有东西可重放就不该动 feature）。
+# 但 production 派生、构建校验、推送、健康检查在两种情况下都要跑，
+# 所以这里用 MIRROR_MOVED 包裹，而不是提前 exit。
+if [ "$MIRROR_MOVED" = 1 ]; then
 
-if [ $rc -ne 0 ]; then
-  if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
-  || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
-    warn "rebase 冲突，现场已保留"
-    echo "冲突文件：" >&2
-    git diff --name-only --diff-filter=U >&2 || true
-    hints
-    exit 3
+  # ---------------------------------------------------------- 4. 备份
+  BACKUP_TAG="fork/backup/$CUSTOM/$TS"
+  git tag "$BACKUP_TAG" "$CUSTOM"
+  git tag "fork/backup/$MIRROR/$TS" "$OLD_MIRROR"
+  say "已备份: $BACKUP_TAG  (及 $MIRROR 旧值)"
+
+  # ---------------------------------------------------------- 5. rebase
+  base="$(cat "$BASE_FILE" 2>/dev/null || git merge-base "$MIRROR" "$CUSTOM")"
+  if ! git merge-base --is-ancestor "$base" "$CUSTOM" 2>/dev/null; then
+    warn "基点 $base 已不是 $CUSTOM 的祖先，回退到 merge-base"
+    base="$(git merge-base "$MIRROR" "$CUSTOM")"
   fi
-  die "rebase 失败（退出 $rc），见上方输出；备份 tag: $BACKUP_TAG"
-fi
+  BEFORE="$(git rev-list --count "$base..$CUSTOM")"
+  say "重放 $BEFORE 条定制补丁：($base .. $CUSTOM) -> $MIRROR"
 
-# ------------------------------------------------------------ 6. 后置校验
-say "后置校验"
-git merge-base --is-ancestor "$MIRROR" "$CUSTOM" || die "$CUSTOM 未包含 $MIRROR，异常"
-echo "✓ $CUSTOM 坐在 $MIRROR 之上"
+  set +e
+  git rebase --no-fork-point --onto "$MIRROR" "$base" "$CUSTOM"
+  rc=$?
+  set -e
 
-merges="$(git rev-list --merges "$MIRROR..$CUSTOM")"
-if [ -n "$merges" ]; then
-  die "$CUSTOM 上出现 merge commit —— 说明有人执行过 git pull 造出 merge。
-      请先 git rebase -i $MIRROR 拍平，再重新同步。
-      备份 tag: $BACKUP_TAG"
+  if [ $rc -ne 0 ]; then
+    if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
+    || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+      warn "rebase 冲突，现场已保留"
+      echo "冲突文件：" >&2
+      git diff --name-only --diff-filter=U >&2 || true
+      hints
+      exit 3
+    fi
+    die "rebase 失败（退出 $rc），见上方输出；备份 tag: $BACKUP_TAG"
+  fi
+
+  # ---------------------------------------------------------- 6. 后置校验
+  say "后置校验"
+  git merge-base --is-ancestor "$MIRROR" "$CUSTOM" || die "$CUSTOM 未包含 $MIRROR，异常"
+  echo "✓ $CUSTOM 坐在 $MIRROR 之上"
+
+  merges="$(git rev-list --merges "$MIRROR..$CUSTOM")"
+  if [ -n "$merges" ]; then
+    die "$CUSTOM 上出现 merge commit —— 说明有人执行过 git pull 造出 merge。
+        请先 git rebase -i $MIRROR 拍平，再重新同步。
+        备份 tag: $BACKUP_TAG"
+  fi
+  echo "✓ 定制序列线性，无 merge commit"
+
+  AFTER="$(git rev-list --count "$MIRROR..$CUSTOM")"
+  if [ "$AFTER" -lt "$BEFORE" ]; then
+    warn "定制补丁数从 $BEFORE 降到 $AFTER —— 有补丁被判定为 clean cherry-pick 而静默丢弃。"
+    warn "若这是「上游已实现了我的补丁」，属预期；若否，用 git reset --hard $BACKUP_TAG 回退。"
+    # 对比【备份的旧 feature】与【新 base】：'-' 打头的就是 patch-id 已被上游吸收、因而被丢弃的提交。
+    # 注意不能用 --right-only "$MIRROR...$CUSTOM"，那列出的是【剩下的】补丁，语义正好相反。
+    warn "被丢弃的补丁（'-' 表示上游已有等价实现）："
+    git cherry -v "$MIRROR" "$BACKUP_TAG" 2>/dev/null | grep '^-' | sed 's/^- /  /' >&2 || true
+  fi
+
 fi
-echo "✓ 定制序列线性，无 merge commit"
 
 AFTER="$(git rev-list --count "$MIRROR..$CUSTOM")"
-if [ "$AFTER" -lt "$BEFORE" ]; then
-  warn "定制补丁数从 $BEFORE 降到 $AFTER —— 有补丁被判定为 clean cherry-pick 而静默丢弃。"
-  warn "若这是「上游已实现了我的补丁」，属预期；若否，用 git reset --hard $BACKUP_TAG 回退。"
-  # 对比【备份的旧 feature】与【新 base】：'-' 打头的就是 patch-id 已被上游吸收、因而被丢弃的提交。
-  # 注意不能用 --right-only "$MIRROR...$CUSTOM"，那列出的是【剩下的】补丁，语义正好相反。
-  warn "被丢弃的补丁（'-' 表示上游已有等价实现）："
-  git cherry -v "$MIRROR" "$BACKUP_TAG" 2>/dev/null | grep '^-' | sed 's/^- /  /' >&2 || true
-fi
 echo "✓ 定制补丁数: $AFTER"
 
 printf '%s\n' "$MIRROR_NOW" > "$BASE_FILE"
