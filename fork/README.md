@@ -366,9 +366,12 @@ git worktree remove ../weknora-sync-test
 |---|---|---|---|---|
 | 1 | 本工作流自身（`fork/` 工具、`CLAUDE.md`） | **无** —— 全部是上游不存在的新路径 | 新增文件 | 不适用（fork 专属） |
 | 2 | 报表自动化方案（语雀报表文档规范 + `order-report` 技能包 + Agent 提示词 + 分层自检清单），见 `fork/report-automation/README.md` | **无** —— 全部新增文件，落在上游不存在的 `fork/report-automation/` | 新增文件（零上游代码改动） | 上游**无**报表/导出类实现；本方案只用上游既有的「上传技能包 + 沙箱密钥 + 自定义 Agent + 沙箱产物链路」四个扩展点 |
+| 3 | **飞书数据源同步保持目录结构**：把源节点层级编码进 `FileName`，供下游拆成 `folder_path`。另修 `usesSourceIdentityDuplicateCheck` 的漏项 | `feishu/core/engine.go`（+17）、`feishu/wiki/connector.go`（+4/-3）、`feishu/drive/connector.go`（+5/-4）、`knowledge_create.go`（+21/-1）；新增文件 6 个（`datasource/folder.go`、`feishu/core/folder_path.go` + 4 个测试） | 新文件 + 接缝，接缝合计 **55 行** | 上游**无**飞书层级→文件夹映射。语雀同类能力上游已实现（`4364e61a` / PR #3476，含 `folder_mode`/`toc_only` 开关），**复用它，不要自己写** |
 
-> 现状：`feature` 上 14 个提交全部是工作流的搭建与修复，没有一行改动上游文件。
-> 业务定制目前只有第 2 项，且它是**纯新增文件**（不动上游任何路径），因此不增加冲突面。
+> 现状：`feature` 共 18 个提交，其中业务定制 2 个（第 2、3 项）。
+> 第 1、2 项是**纯新增文件**（不动上游任何路径），冲突面为零；第 3 项**首次触及上游文件**，
+> 接缝合计 55 行（`engine.go` 17 / `knowledge_create.go` 22 / wiki 7 / drive 9），
+> 是当前唯一的冲突面来源。别让它继续长。
 >
 > 第 2 项落地时确认过的上游事实（供后续复用，别重复踩）：
 > - `database_query` 工具的白名单**硬编码**为 `knowledge_bases` / `knowledges` / `chunks`
@@ -383,8 +386,31 @@ git worktree remove ../weknora-sync-test
 > - 切块器保护 Markdown 表格行（跨块重复表头），但**不保护代码块**
 >   （`internal/infrastructure/chunker/splitter.go` 的 `protectedPatterns`）。
 >
-> 下一个计划中的定制是「飞书数据源同步保持目录结构」。**语雀那部分上游已实现**
-> （`4364e61a` / PR #3476），直接复用，不要自己写。动手前先做第 6 节的上游撞车检查。
+> 第 3 项落地时确认过的上游事实：
+> - **上游语雀的「保持目录结构」是默认关闭的开关，不是缺失的功能。** 2026-09-29 实测
+>   「同步后前端没有目录层级」，排查结论是开关没开，不是 bug：`defaultFolderSettings()`
+>   返回 `folderModeNone`（`internal/datasource/connector/yuque/types.go:389`），前端只在
+>   **新建**数据源时才写 `folder_mode='toc'`（`DataSourceEditorDialog.vue` 的 `selectType()`，
+>   注释原文 "Only on create: an existing source keeps what it was built with"），
+>   **已存在的数据源不会被改**。所以「目录不显示」的第一嫌疑永远是开关。
+>   判定方法：编辑该语雀数据源，把「保持目录结构」选成 toc 重跑同步，看后端有没有
+>   `[Yuque] folder path derivation enabled: folder_mode=toc`（`connector.go:165`）。
+>   这条排查路径本可以省掉一整轮重复实现，记在这里。
+> - `FetchedItem.FileName` 是目录层级的**唯一**载体：下游靠 `SplitKnowledgeRelativePath`
+>   → `NormalizeKnowledgeFolderPath` 拆出 `folder_path`
+>   （`internal/types/knowledge_folder.go:83`）。连接器要产出目录，只能把层级编码进
+>   FileName，没有第二条路。
+> - `usesSourceIdentityDuplicateCheck`（`knowledge_create.go`）决定该通道按源路径还是按
+>   内容去重。**上游语雀在 `folder_mode=toc` 下已经输出带路径的 FileName，却没有把自己
+>   加进这个名单**（上游至今只有 GitLab/Confluence），同内容不同目录的文档会被误判为重复
+>   丢弃 —— 这是上游漏项，第 3 项一并补上 Feishu/FeishuDrive/LarkDrive/Yuque。
+> - 本机 `internal/types` 包 init 时 `gojieba` 的 CGO 会段错误（`_Cfunc_NewJieba`，
+>   Exception 0xc0000005），**所有 import `internal/types` 的测试包在本机都跑不起来**。
+>   已在纯净 `upstream/main` 上复现，与定制无关。本机验证只能靠
+>   `go build ./cmd/server` + `go vet`（vet 会编译测试文件但不跑 init）。
+>
+> 下一个计划中的定制：暂无。语雀那部分上游已实现（`4364e61a` / PR #3476），直接复用，
+> 不要自己写。动手前先做第 6 节的上游撞车检查。
 
 ## 11. 变更记录
 
@@ -400,6 +426,8 @@ git worktree remove ../weknora-sync-test
 | 2026-09-28 | 新增「排障：git 连不上 GitHub」小节（系统代理与 git 代理的区别、hosts 不能配代理） |
 | 2026-09-28 | 新增第 0 节「日常流程速查」：写功能 / 同步上游 / 处理冲突 / 部署 / 自检命令 |
 | 2026-09-28 | 第 10 节新增定制项 2：报表自动化方案（`fork/report-automation/`，纯新增文件，不动上游路径）；同节记入落地时确认的上游事实（`database_query` 白名单硬编码、技能 env 声明的登记规则、`$WEKNORA_SKILL_DIR`、代码块不被切块保护） |
+| 2026-09-29 | 第 10 节新增定制项 3：飞书数据源同步保持目录结构（首次触及上游文件，接缝 55 行）；同节记入「语雀目录开关默认关闭」的排查结论、`FileName` 是目录层级唯一载体、`usesSourceIdentityDuplicateCheck` 的上游漏项、本机 gojieba CGO 导致测试跑不起来的限制 |
+| 2026-09-29 | 同步上游至 `1912ba26c`（吸收 23 个提交），`feature` 重放 16→18 条定制补丁 |
 
 ### 验证记录（模拟上游）
 
