@@ -238,9 +238,10 @@ func (o wikiOps) List(ctx context.Context, client *core.Client, resourceID strin
 	return nodes, nil, err
 }
 
-func (o wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
-func (o wikiOps) Title(n core.WikiNode) string   { return n.Title }
-func (o wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
+func (o wikiOps) Token(n core.WikiNode) string       { return n.NodeToken }
+func (o wikiOps) Title(n core.WikiNode) string       { return n.Title }
+func (o wikiOps) ObjType(n core.WikiNode) string     { return n.ObjType }
+func (o wikiOps) ParentToken(n core.WikiNode) string { return n.ParentNodeID }
 
 // EditTime is the change-detection timestamp: ObjEditTime (document content)
 // with a NodeEditTime fallback for nodes that lack obj_edit_time. It drives the

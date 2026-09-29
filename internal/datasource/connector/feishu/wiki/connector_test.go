@@ -630,6 +630,47 @@ func TestFetchAll_DocxNode(t *testing.T) {
 	}
 }
 
+// TestFetchAll_FilesItemsUnderSourceFolder covers the folder-path rebuild: a
+// node nested under another node must be filed inside it, while a direct child
+// of the selected scope stays at the knowledge base root.
+func TestFetchAll_FilesItemsUnderSourceFolder(t *testing.T) {
+	// space1
+	//   ├── "运维手册.pdf" (also a parent node, as Feishu wiki parents are documents)
+	//   │      └── "05-运维与维护.pdf"  → 运维手册.pdf/05-运维与维护.pdf
+	//   └── "01-上手.pdf"               → 01-上手.pdf (unchanged)
+	topNodes := []core.WikiNode{
+		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "运维手册.pdf", HasChild: true},
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "file", Title: "01-上手.pdf"},
+	}
+	childNodes := map[string][]core.WikiNode{
+		"nt-parent": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "05-运维与维护.pdf"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	c := NewConnector(core.RegionFeishu)
+	items, err := c.FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+
+	got := make(map[string]string, len(items))
+	for _, it := range items {
+		got[it.ExternalID] = it.FileName
+	}
+	if want := "运维手册.pdf/05-运维与维护.pdf"; got["nt-child"] != want {
+		t.Errorf("nested node FileName = %q, want %q", got["nt-child"], want)
+	}
+	if want := "01-上手.pdf"; got["nt-root"] != want {
+		t.Errorf("top-level node FileName = %q, want %q", got["nt-root"], want)
+	}
+	if want := "运维手册.pdf"; got["nt-parent"] != want {
+		t.Errorf("parent node FileName = %q, want %q", got["nt-parent"], want)
+	}
+}
+
 func TestContentTimes_FallBackToNodeTimes(t *testing.T) {
 	n := core.WikiNode{NodeCreateTime: "1700000001", NodeEditTime: "1711468800"}
 	if got := contentEditTime(n).Unix(); got != 1711468800 {

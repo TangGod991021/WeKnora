@@ -41,6 +41,13 @@ type NodeOps[N any] interface {
 	Token(n N) string
 	Title(n N) string
 	ObjType(n N) string
+	// ParentToken is the token of the node's parent within the listing, or ""
+	// when the parent lies outside it (a direct child of the caller-selected
+	// resource). The engine walks these to rebuild the source folder hierarchy
+	// into each item's FileName. Implementations must be pure accessors - a
+	// connector that cannot supply a parent returns "" and simply yields a
+	// flat layout, exactly as before.
+	ParentToken(n N) string
 	// EditTime is the change-detection timestamp string stored in the cursor.
 	EditTime(n N) string
 
@@ -126,6 +133,10 @@ func runSync[N any](
 			}
 		}
 
+		// Rebuild the source folder hierarchy once per listing so every item
+		// below can be filed under it.
+		folderPaths := folderPathIndex(nodes, ops.Token, ops.Title, ops.ParentToken)
+
 		currentNodes := make(map[string]bool)
 		tally := newFetchTally(len(nodes))
 		for i, node := range nodes {
@@ -174,6 +185,12 @@ func runSync[N any](
 				if len(items) > 0 {
 					tally.fetch()
 					for _, it := range items {
+						// File the item under its source folder. Items produced
+						// from one node (the document itself plus any exported
+						// attachments and inline images) all share that node's
+						// folder, so this is applied here rather than inside
+						// each connector's fetch chain.
+						it.FileName = datasource.WithKnowledgeFolderPath(folderPaths[tok], it.FileName)
 						if eerr := h.Emit(ctx, *it); eerr != nil {
 							return nil, eerr
 						}

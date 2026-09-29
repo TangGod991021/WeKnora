@@ -1166,9 +1166,29 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	}
 }
 
+// usesSourceIdentityDuplicateCheck reports whether a channel identifies its
+// documents by their position in the source tree rather than by content.
+//
+// Connectors listed here put a source-relative path into FetchedItem.FileName,
+// so two byte-identical files living at different paths in the source are
+// genuinely different documents and must both be kept. Every other channel
+// falls back to content deduplication: the same bytes imported twice are the
+// same knowledge item, which is what keeps a re-upload or a re-run from
+// creating duplicates.
+//
+// Adding a channel here is only correct once that connector actually emits
+// path-qualified names - otherwise a legitimate duplicate upload silently
+// becomes two items.
 func usesSourceIdentityDuplicateCheck(channel string) bool {
 	switch channel {
-	case types.ConnectorTypeGitLab, types.ChannelConfluence:
+	case types.ConnectorTypeGitLab,
+		types.ChannelConfluence,
+		// Feishu wiki, Feishu Drive and Lark Drive all file their documents
+		// under the source node hierarchy.
+		types.ChannelFeishu,
+		types.ChannelFeishuDrive,
+		types.ChannelLarkDrive,
+		types.ChannelYuque:
 		return true
 	default:
 		return false
